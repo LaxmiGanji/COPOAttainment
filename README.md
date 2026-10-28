@@ -63,17 +63,6 @@ The frontend application will be live at `http://localhost:3000`.
 
 ---
 
-## Default Login Credentials
-
-Use any of the seeded accounts to log in:
-
-| Role | Email | Password |
-|---|---|---|
-| Faculty | `faculty@college.edu` | `password123` |
-| Student | `student@college.edu` | `password123` |
-| Admin | `admin@college.edu` | `admin123` |
-
----
 
 ## Key Features
 

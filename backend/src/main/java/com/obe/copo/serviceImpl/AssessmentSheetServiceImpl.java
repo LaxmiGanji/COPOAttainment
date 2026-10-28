@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -94,7 +95,55 @@ public class AssessmentSheetServiceImpl implements AssessmentSheetService {
             targetExam = createDefaultExamForCourse(course, (examType != null && !examType.isBlank()) ? examType : "IA 1");
         }
 
-        return calculationService.generateTemplateForCourse(course, List.of(targetExam));
+        SheetAssessmentDto sheet = calculationService.generateTemplateForCourse(course, List.of(targetExam));
+
+        // Populate previous marks from database if they exist for this exam
+        if (targetExam != null && targetExam.getId() != null) {
+            List<StudentMarksRecord> savedRecords = studentMarksRecordRepository.findByExamId(targetExam.getId());
+            if (savedRecords != null && !savedRecords.isEmpty()) {
+                Map<String, StudentMarksRecord> recordMap = new HashMap<>();
+                for (StudentMarksRecord r : savedRecords) {
+                    if (r.getStudentUsn() != null) {
+                        recordMap.put(r.getStudentUsn().trim(), r);
+                    }
+                }
+
+                boolean populateFinal = (sheet.getFinalQuestions() != null && !sheet.getFinalQuestions().isEmpty());
+
+                boolean hasAnyMarks = false;
+                if (sheet.getStudents() != null) {
+                    for (SheetAssessmentDto.StudentRowDto st : sheet.getStudents()) {
+                        if (st.getStudentId() != null) {
+                            StudentMarksRecord r = recordMap.get(st.getStudentId().trim());
+                            if (r != null && r.getSubQuestionScores() != null && !r.getSubQuestionScores().isEmpty()) {
+                                hasAnyMarks = true;
+                                Map<String, String> scoreMap = populateFinal ? st.getFinalScores() : st.getMidScores();
+                                if (scoreMap == null) {
+                                    scoreMap = new LinkedHashMap<>();
+                                    if (populateFinal) st.setFinalScores(scoreMap);
+                                    else st.setMidScores(scoreMap);
+                                }
+                                for (Map.Entry<String, Double> entry : r.getSubQuestionScores().entrySet()) {
+                                    Double val = entry.getValue();
+                                    if (val != null) {
+                                        String formatted = (val % 1.0 == 0)
+                                                ? String.valueOf(val.intValue())
+                                                : String.valueOf(val);
+                                        scoreMap.put(entry.getKey(), formatted);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (hasAnyMarks) {
+                    sheet = calculationService.calculateAssessmentSheet(sheet);
+                }
+            }
+        }
+
+        return sheet;
     }
 
     private boolean isCategoryMatch(ExamAssessment e, String type) {
@@ -179,7 +228,7 @@ public class AssessmentSheetServiceImpl implements AssessmentSheetService {
 
     @Override
     public SheetAssessmentDto calculateSheet(SheetAssessmentDto input) {
-        return calculationService.calculateAssessmentSheet(input);
+        return saveAssessmentSheetMarks(input);
     }
 
     @Override
@@ -204,7 +253,13 @@ public class AssessmentSheetServiceImpl implements AssessmentSheetService {
         }
         if (exam == null && course != null) {
             List<ExamAssessment> exams = examAssessmentRepository.findByCourseId(course.getId());
-            if (!exams.isEmpty()) {
+            if (input.getExamType() != null && !input.getExamType().trim().isEmpty()) {
+                exam = exams.stream()
+                        .filter(e -> isCategoryMatch(e, input.getExamType()))
+                        .findFirst()
+                        .orElse(null);
+            }
+            if (exam == null && !exams.isEmpty()) {
                 exam = exams.get(0);
             }
         }

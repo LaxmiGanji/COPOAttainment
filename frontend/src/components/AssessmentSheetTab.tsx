@@ -14,7 +14,6 @@ import {
 import {
   Download,
   RefreshCw,
-  Plus,
   Trash2,
   CheckCircle,
   FileSpreadsheet,
@@ -215,37 +214,6 @@ export default function AssessmentSheetTab({
     }
   };
 
-  const handleAddStudent = async () => {
-    if (!sheet) return;
-    const updated = JSON.parse(JSON.stringify(sheet));
-    const nextIdx = updated.students.length + 1;
-    const nextUsn = `192-15-${String(nextIdx).padStart(4, "0")}`;
-
-    const newMid: Record<string, string> = {};
-    updated.midtermQuestions.forEach((q: any) => (newMid[q.id] = ""));
-
-    const newFinal: Record<string, string> = {};
-    updated.finalQuestions.forEach((q: any) => (newFinal[q.id] = ""));
-
-    updated.students.push({
-      studentId: nextUsn,
-      studentName: `Student ${nextIdx}`,
-      midScores: newMid,
-      finalScores: newFinal,
-    });
-
-    setSheet(updated);
-
-    try {
-      setCalculating(true);
-      const computed = await calculateAssessmentSheet(updated);
-      setSheet(computed);
-    } catch (e: any) {
-      console.error(e);
-    } finally {
-      setCalculating(false);
-    }
-  };
 
   const handleRemoveStudent = async (sIdx: number) => {
     if (!sheet) return;
@@ -513,13 +481,6 @@ export default function AssessmentSheetTab({
               </button>
             </div>
 
-            <button
-              onClick={handleAddStudent}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 transition cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Add Student</span>
-            </button>
 
             <button
               onClick={handleAutoFillSample}

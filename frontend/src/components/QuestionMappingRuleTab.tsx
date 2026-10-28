@@ -9,12 +9,10 @@ import {
   RuleEngineCase,
   createExam,
   updateExam,
-  simulateRuleEngine,
   cleanExamTitle,
 } from "@/lib/api";
 import {
   FileText,
-  Play,
   Plus,
   Trash2,
   CheckCircle,
@@ -75,30 +73,12 @@ export default function QuestionMappingRuleTab({
   const [saving, setSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
-  // Live Simulator state
-  const [simScores, setSimScores] = useState<Record<string, number>>({});
-  const [simResult, setSimResult] = useState<any | null>(null);
-  const [simulating, setSimulating] = useState(false);
-
   useEffect(() => {
     if (selectedExam) {
       setExamForm({
         ...selectedExam,
         title: cleanExamTitle(selectedExam.title),
       });
-      // Initialize simulator with existing questions
-      const initialScores: Record<string, number> = {};
-      selectedExam.questions?.forEach((q) => {
-        if (q.subQuestions && q.subQuestions.length > 0) {
-          q.subQuestions.forEach((sq) => {
-            initialScores[sq.subQuestionId] = sq.maxMarks ? Math.round(sq.maxMarks * 0.8) : 4;
-          });
-        } else {
-          initialScores[q.questionId] = q.directMaxMarks ? Math.round(q.directMaxMarks * 0.8) : 8;
-        }
-      });
-      setSimScores(initialScores);
-      setSimResult(null);
     } else if (course?.id) {
       setExamForm({
         courseId: course.id,
@@ -113,8 +93,6 @@ export default function QuestionMappingRuleTab({
         },
         questions: [],
       });
-      setSimScores({});
-      setSimResult(null);
     }
   }, [selectedExam, course?.id]);
 
@@ -429,48 +407,6 @@ export default function QuestionMappingRuleTab({
       return null;
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleRunSimulation = async () => {
-    setSimulating(true);
-
-    // Auto-derive rule parameters for simulation
-    const mandatoryIds = examForm.questions.filter((q) => q.isMandatory).map((q) => q.questionId);
-    const orPairs: any[] = [];
-    const pairedSet = new Set<string>();
-    examForm.questions.forEach((q) => {
-      if (q.orWithQuestionId && q.orWithQuestionId.trim() !== "" && !pairedSet.has(q.questionId)) {
-        pairedSet.add(q.questionId);
-        pairedSet.add(q.orWithQuestionId);
-        orPairs.push({
-          groupName: `${q.questionId} OR ${q.orWithQuestionId}`,
-          questionA: q.questionId,
-          questionB: q.orWithQuestionId,
-        });
-      }
-    });
-
-    let derivedCase: RuleEngineCase = "CASE_1_TOP_N";
-    if (orPairs.length > 0) derivedCase = "CASE_3_PAIRWISE_OR";
-    else if (mandatoryIds.length > 0) derivedCase = "CASE_2_MANDATORY_PLUS_TOP_N";
-
-    try {
-      const res = await simulateRuleEngine({
-        ruleEngineCase: derivedCase,
-        ruleConfig: {
-          topN: examForm.ruleConfig.topN || 3,
-          mandatoryQuestionIds: mandatoryIds,
-          orPairs: orPairs,
-        },
-        questions: examForm.questions,
-        subQuestionScores: simScores,
-      });
-      setSimResult(res);
-    } catch (err: any) {
-      alert("Simulation failed: " + err.message);
-    } finally {
-      setSimulating(false);
     }
   };
 
@@ -957,129 +893,6 @@ export default function QuestionMappingRuleTab({
             <span>Save & Generate Assessment Template</span>
             <ArrowRight className="w-4 h-4" />
           </button>
-        )}
-      </div>
-
-      {/* ------------------------------------------------------------- */}
-      {/* LIVE SIMULATOR: Test question choice selection with live audit */}
-      {/* ------------------------------------------------------------- */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-white shadow-md">
-        <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <Play className="w-5 h-5 text-emerald-400" />
-            <h3 className="text-base font-bold text-white">Live Rule Simulator</h3>
-          </div>
-          <button
-            type="button"
-            onClick={handleRunSimulation}
-            disabled={simulating}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-4 py-2 rounded-lg transition cursor-pointer flex items-center gap-1.5"
-          >
-            {simulating ? "Simulating..." : "Run Test Evaluation"}
-          </button>
-        </div>
-
-        <p className="text-xs text-slate-400 mb-4">
-          Enter mock marks for each sub-question below to test how the engine aggregates main questions, checks mandatory rules, resolves OR pairs, and selects the best score.
-        </p>
-
-        {/* Mock Scores Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 mb-6">
-          {examForm.questions.flatMap((q) =>
-            q.subQuestions && q.subQuestions.length > 0
-              ? q.subQuestions.map((sq) => (
-                  <div key={sq.subQuestionId} className="bg-slate-950 border border-slate-800 p-2 rounded-lg">
-                    <label className="block text-[11px] font-mono text-slate-400 mb-1">
-                      {sq.subQuestionId} ({sq.coCode})
-                    </label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      min={0}
-                      max={sq.maxMarks}
-                      className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm font-bold text-center text-amber-300"
-                      value={simScores[sq.subQuestionId] ?? 0}
-                      onChange={(e) =>
-                        setSimScores({
-                          ...simScores,
-                          [sq.subQuestionId]: parseFloat(e.target.value) || 0,
-                        })
-                      }
-                    />
-                  </div>
-                ))
-              : [
-                  <div key={q.questionId} className="bg-slate-950 border border-slate-800 p-2 rounded-lg">
-                    <label className="block text-[11px] font-mono text-slate-400 mb-1">
-                      {q.questionId} ({q.coCode})
-                    </label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      min={0}
-                      className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm font-bold text-center text-amber-300"
-                      value={simScores[q.questionId] ?? 0}
-                      onChange={(e) =>
-                        setSimScores({
-                          ...simScores,
-                          [q.questionId]: parseFloat(e.target.value) || 0,
-                        })
-                      }
-                    />
-                  </div>,
-                ]
-          )}
-        </div>
-
-        {/* Simulation Output */}
-        {simResult && (
-          <div className="bg-slate-950 border border-indigo-900/50 rounded-xl p-5 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-3">
-              <div>
-                <span className="text-xs uppercase tracking-wider text-slate-400">Total Evaluated Score</span>
-                <div className="text-2xl font-black text-emerald-400">
-                  {simResult.totalScore} / {examForm.maxMarks}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-400">Questions Counted:</span>
-                <div className="flex gap-1">
-                  {simResult.selectedQuestionIds?.map((id: string) => (
-                    <span key={id} className="bg-emerald-950 border border-emerald-700 text-emerald-300 text-xs font-bold px-2 py-0.5 rounded">
-                      {id}
-                    </span>
-                  ))}
-                </div>
-                {simResult.ignoredQuestionIds?.length > 0 && (
-                  <>
-                    <span className="text-xs text-slate-400 ml-2">Ignored:</span>
-                    <div className="flex gap-1">
-                      {simResult.ignoredQuestionIds.map((id: string) => (
-                        <span key={id} className="bg-rose-950 border border-rose-800 text-rose-300 text-xs font-bold px-2 py-0.5 rounded">
-                          {id}
-                        </span>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Step-by-Step plain text explanation */}
-            <div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">
-                Evaluation Step Audit
-              </span>
-              <div className="space-y-1.5 font-mono text-xs">
-                {simResult.evaluationSteps?.map((step: string, i: number) => (
-                  <div key={i} className="text-slate-300 flex items-start gap-2">
-                    <ArrowRight className="w-3.5 h-3.5 text-indigo-400 mt-0.5 shrink-0" />
-                    <span>{step}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
         )}
       </div>
     </div>

@@ -10,7 +10,6 @@ import {
 import CourseSetupTab from "@/components/CourseSetupTab";
 import CoPoMatrixTab from "@/components/CoPoMatrixTab";
 import QuestionMappingRuleTab from "@/components/QuestionMappingRuleTab";
-import MarksGridTab from "@/components/MarksGridTab";
 import AttainmentDashboardTab from "@/components/AttainmentDashboardTab";
 import StudentPortalView from "@/components/StudentPortalView";
 import AssessmentSheetTab from "@/components/AssessmentSheetTab";
@@ -19,7 +18,6 @@ import {
   GraduationCap,
   BookOpen,
   Grid,
-  Table as TableIcon,
   Award,
   User,
   ShieldCheck,
@@ -169,10 +167,6 @@ export default function Home() {
       }
       return [...prev, savedExam];
     });
-  };
-
-  const handleAttainmentRecalculated = () => {
-    // Refresh handler
   };
 
   // If not logged in, show dedicated Auth Login Screen
@@ -335,18 +329,6 @@ export default function Home() {
                   <Award className="w-4 h-4" />
                   5. Attainment Dashboard (CO & PO)
                 </button>
-
-                <button
-                  onClick={() => setActiveTab(6)}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                    activeTab === 6
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                      : "text-slate-400 hover:text-white hover:bg-slate-800"
-                  }`}
-                >
-                  <TableIcon className="w-4 h-4" />
-                  6. Raw Marks Grid (Alt)
-                </button>
               </nav>
             </div>
 
@@ -406,13 +388,6 @@ export default function Home() {
 
               {activeTab === 5 && (
                 <AttainmentDashboardTab exam={selectedExam} />
-              )}
-
-              {activeTab === 6 && (
-                <MarksGridTab
-                  exam={selectedExam}
-                  onAttainmentCalculated={handleAttainmentRecalculated}
-                />
               )}
             </div>
           </div>

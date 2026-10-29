@@ -5,11 +5,8 @@ import {
   GraduationCap, 
   ShieldCheck, 
   UserCheck, 
-  BookOpen, 
   Award, 
-  CheckCircle2, 
   ArrowRight, 
-  Sparkles,
   KeyRound,
   IdCard,
   Building2

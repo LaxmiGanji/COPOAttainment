@@ -16,13 +16,10 @@ import {
   Plus,
   Trash2,
   CheckCircle,
-  AlertCircle,
-  HelpCircle,
   ArrowRight,
   Sparkles,
   GitFork,
   Star,
-  Layers,
   BookOpen,
 } from "lucide-react";
 
@@ -454,7 +451,7 @@ export default function QuestionMappingRuleTab({
               Question-to-CO Mapping & Evaluation Setup
             </h2>
             <p className="text-sm text-slate-400 mt-1">
-              Configure each question's marks, mapped Course Outcomes (COs), and simply choose right near each question if it is <strong>Mandatory</strong> or a <strong>Choice</strong>.
+              Configure each question&apos;s marks, mapped Course Outcomes (COs), and simply choose right near each question if it is <strong>Mandatory</strong> or a <strong>Choice</strong>.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

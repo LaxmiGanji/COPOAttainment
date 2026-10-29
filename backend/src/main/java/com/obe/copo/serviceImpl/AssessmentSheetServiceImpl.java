@@ -273,24 +273,8 @@ public class AssessmentSheetServiceImpl implements AssessmentSheetService {
                 if (st.getStudentId() == null || st.getStudentId().trim().isEmpty()) continue;
 
                 Map<String, Double> subScores = new HashMap<>();
-                if (st.getMidScores() != null) {
-                    st.getMidScores().forEach((qId, val) -> {
-                        if (val != null && !val.trim().isEmpty() && !"-".equals(val.trim())) {
-                            try {
-                                subScores.put(qId, Double.parseDouble(val.trim()));
-                            } catch (NumberFormatException ignored) {}
-                        }
-                    });
-                }
-                if (st.getFinalScores() != null) {
-                    st.getFinalScores().forEach((qId, val) -> {
-                        if (val != null && !val.trim().isEmpty() && !"-".equals(val.trim())) {
-                            try {
-                                subScores.put(qId, Double.parseDouble(val.trim()));
-                            } catch (NumberFormatException ignored) {}
-                        }
-                    });
-                }
+                extractScores(st.getMidScores(), subScores);
+                extractScores(st.getFinalScores(), subScores);
 
                 EvaluationResult evalResult = examService.evaluateStudentMarks(exam, subScores);
 
@@ -328,5 +312,15 @@ public class AssessmentSheetServiceImpl implements AssessmentSheetService {
     @Override
     public byte[] exportPdf(SheetAssessmentDto input) throws Exception {
         return pdfReportService.generateAssessmentPdf(input);
+    }
+    private void extractScores(Map<String, String> rawScores, Map<String, Double> targetMap) {
+        if (rawScores == null) return;
+        rawScores.forEach((qId, val) -> {
+            if (val != null && !val.trim().isEmpty() && !"-".equals(val.trim())) {
+                try {
+                    targetMap.put(qId, Double.parseDouble(val.trim()));
+                } catch (NumberFormatException ignored) {}
+            }
+        });
     }
 }

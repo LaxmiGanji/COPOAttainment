@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Course, CourseOutcome, updateCourse, createCourse } from "@/lib/api";
-import { BookOpen, CheckCircle, Plus, Trash2, Sliders, Target, ShieldCheck } from "lucide-react";
+import { BookOpen, CheckCircle, Plus, Trash2, Sliders, Target } from "lucide-react";
 
 interface Props {
   course: Course | null;

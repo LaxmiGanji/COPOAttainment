@@ -4,6 +4,7 @@ import com.obe.copo.service.AttainmentCalculationService;
 
 import com.obe.copo.model.*;
 import com.obe.copo.repository.AttainmentReportRepository;
+import com.obe.copo.repository.CourseOverallAttainmentRepository;
 import com.obe.copo.repository.CourseRepository;
 import com.obe.copo.repository.ExamAssessmentRepository;
 import com.obe.copo.repository.StudentMarksRecordRepository;
@@ -26,6 +27,9 @@ public class AttainmentCalculationServiceImpl implements AttainmentCalculationSe
 
     @Autowired
     private AttainmentReportRepository attainmentReportRepository;
+
+    @Autowired
+    private CourseOverallAttainmentRepository courseOverallAttainmentRepository;
 
     /**
      * Calculates the complete NBA CO-PO Attainment Report for an Exam
@@ -198,11 +202,11 @@ public class AttainmentCalculationServiceImpl implements AttainmentCalculationSe
             }
 
             int directLevel = 0;
-            if (achievedPercent >= 70.0) {
+            if (achievedPercent >= 75.0) {
                 directLevel = 3;
-            } else if (achievedPercent >= 60.0) {
+            } else if (achievedPercent >= 70.0) {
                 directLevel = 2;
-            } else if (achievedPercent >= 50.0) {
+            } else if (achievedPercent >= 65.0) {
                 directLevel = 1;
             }
 
@@ -235,9 +239,9 @@ public class AttainmentCalculationServiceImpl implements AttainmentCalculationSe
         for (CoAttainmentSummary cs : coAttainments) {
             double lvl = cs.getDirectAttainmentLevel();
             if (lvl <= 0 && cs.getStudentsMetPercent() > 0) {
-                if (cs.getStudentsMetPercent() >= 70.0) lvl = 3.0;
-                else if (cs.getStudentsMetPercent() >= 60.0) lvl = 2.0;
-                else if (cs.getStudentsMetPercent() >= 50.0) lvl = 1.0;
+                if (cs.getStudentsMetPercent() >= 75.0) lvl = 3.0;
+                else if (cs.getStudentsMetPercent() >= 70.0) lvl = 2.0;
+                else if (cs.getStudentsMetPercent() >= 65.0) lvl = 1.0;
             }
             coAttainmentLevelMap.put(cs.getCoCode(), lvl);
         }
@@ -330,6 +334,362 @@ public class AttainmentCalculationServiceImpl implements AttainmentCalculationSe
         report.setCoAttainments(coAttainments);
         report.setPoAttainments(poAttainments);
 
-        return attainmentReportRepository.save(report);
+        AttainmentReport saved = attainmentReportRepository.save(report);
+        try {
+            calculateCourseOverallAttainment(course.getId());
+        } catch (Exception ignored) {}
+        return saved;
+    }
+
+    /**
+     * Calculates the Overall Combined Course CO and PO Attainment across IA 1, IA 2, and Final examinations:
+     * - Mid/Internal CO Attainment = (CO Attainment of IA1 + CO Attainment of IA2) / 2
+     * - If only 1 IA is entered, that IA's CO attainment is used directly without distortion
+     * - Internal component: 40% weightage (0.40 * COMid)
+     * - Final component: 60% weightage (0.60 * COFinal)
+     * - Total CO Attainment = Internal CO Attainment + Final CO Attainment
+     */
+    @Override
+    public CourseOverallAttainment calculateCourseOverallAttainment(String courseId) {
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new IllegalArgumentException("Course not found with id: " + courseId));
+
+        List<ExamAssessment> exams = examAssessmentRepository.findByCourseId(courseId);
+
+        ExamAssessment ia1Exam = null;
+        ExamAssessment ia2Exam = null;
+        ExamAssessment finalExam = null;
+
+        for (ExamAssessment e : exams) {
+            String cat = getExamCategory(e);
+            if ("IA 1".equals(cat)) {
+                ia1Exam = e;
+            } else if ("IA 2".equals(cat)) {
+                ia2Exam = e;
+            } else if ("SEM final".equals(cat)) {
+                finalExam = e;
+            }
+        }
+
+        AttainmentReport ia1Report = getReportForExam(ia1Exam);
+        AttainmentReport ia2Report = getReportForExam(ia2Exam);
+        AttainmentReport finalReport = getReportForExam(finalExam);
+
+        boolean ia1Entered = (ia1Report != null && ia1Report.getCoAttainments() != null && !ia1Report.getCoAttainments().isEmpty());
+        boolean ia2Entered = (ia2Report != null && ia2Report.getCoAttainments() != null && !ia2Report.getCoAttainments().isEmpty());
+        boolean finalEntered = (finalReport != null && finalReport.getCoAttainments() != null && !finalReport.getCoAttainments().isEmpty());
+
+        double internalWeight = 0.40;
+        double externalWeight = 0.60;
+        double courseTargetThreshold = course.getTargetThresholdPercent() > 0 ? course.getTargetThresholdPercent() : 60.0;
+
+        // Collect all distinct course outcomes
+        Set<String> coCodes = new LinkedHashSet<>();
+        Map<String, String> coDescriptions = new HashMap<>();
+        Map<String, Double> coTargetMap = new HashMap<>();
+
+        if (course.getCourseOutcomes() != null) {
+            for (CourseOutcome co : course.getCourseOutcomes()) {
+                coCodes.add(co.getCoCode());
+                if (co.getDescription() != null) {
+                    coDescriptions.put(co.getCoCode(), co.getDescription());
+                }
+                if (co.getTargetPercent() > 0) {
+                    coTargetMap.put(co.getCoCode(), co.getTargetPercent());
+                }
+            }
+        }
+        if (ia1Report != null && ia1Report.getCoAttainments() != null) {
+            for (CoAttainmentSummary c : ia1Report.getCoAttainments()) coCodes.add(c.getCoCode());
+        }
+        if (ia2Report != null && ia2Report.getCoAttainments() != null) {
+            for (CoAttainmentSummary c : ia2Report.getCoAttainments()) coCodes.add(c.getCoCode());
+        }
+        if (finalReport != null && finalReport.getCoAttainments() != null) {
+            for (CoAttainmentSummary c : finalReport.getCoAttainments()) coCodes.add(c.getCoCode());
+        }
+
+        List<CourseOverallAttainment.CourseCoAttainmentRow> coRows = new ArrayList<>();
+        Map<String, Double> totalCoLevelMap = new HashMap<>();
+
+        double sumTotalCoPercent = 0.0;
+        int evaluatedCoCount = 0;
+
+        for (String coCode : coCodes) {
+            Double ia1Level = getCoLevelFromReport(ia1Report, coCode);
+            Double ia2Level = getCoLevelFromReport(ia2Report, coCode);
+            Double finalLevel = getCoLevelFromReport(finalReport, coCode);
+
+            Double ia1Pct = getCoPercentFromReport(ia1Report, coCode);
+            Double ia2Pct = getCoPercentFromReport(ia2Report, coCode);
+            Double finalPct = getCoPercentFromReport(finalReport, coCode);
+
+            // 1. Calculate internal mid levels & percentages: average of IA1 and IA2 (or single IA if other not entered)
+            Double internalLevel = calculateMidAverage(ia1Level, ia2Level);
+            Double internalPct = calculateMidAverage(ia1Pct, ia2Pct);
+
+            // 2. Component Attainments: (0.40 * IA1), (0.40 * IA2), then average for Internal
+            Double ia1Weighted = ia1Level != null ? Math.round((internalWeight * ia1Level) * 100.0) / 100.0 : null;
+            Double ia2Weighted = ia2Level != null ? Math.round((internalWeight * ia2Level) * 100.0) / 100.0 : null;
+            Double weightedInternal = calculateMidAverage(ia1Weighted, ia2Weighted);
+
+            Double ia1WeightedPct = ia1Pct != null ? Math.round((internalWeight * ia1Pct) * 100.0) / 100.0 : null;
+            Double ia2WeightedPct = ia2Pct != null ? Math.round((internalWeight * ia2Pct) * 100.0) / 100.0 : null;
+            Double weightedInternalPct = calculateMidAverage(ia1WeightedPct, ia2WeightedPct);
+
+            Double weightedFinal = null;
+            Double weightedFinalPct = null;
+            if (finalLevel != null) {
+                weightedFinal = Math.round((externalWeight * finalLevel) * 100.0) / 100.0;
+            }
+            if (finalPct != null) {
+                weightedFinalPct = Math.round((externalWeight * finalPct) * 100.0) / 100.0;
+            }
+
+            // 3. Total CO Attainment (Internal + Final)
+            Double totalCo = null;
+            if (weightedInternal != null || weightedFinal != null) {
+                double total = (weightedInternal != null ? weightedInternal : 0.0)
+                             + (weightedFinal != null ? weightedFinal : 0.0);
+                totalCo = Math.round(total * 100.0) / 100.0;
+            }
+
+            Double totalPct = null;
+            if (weightedInternalPct != null || weightedFinalPct != null) {
+                double totalP = (weightedInternalPct != null ? weightedInternalPct : 0.0)
+                              + (weightedFinalPct != null ? weightedFinalPct : 0.0);
+                totalPct = Math.round(totalP * 100.0) / 100.0;
+            }
+
+            // 4. Rubric Attainment Level: >=75% -> 3, 70-75% -> 2, 65-70% -> 1, <65% -> 0
+            double effectivePctForLevel = totalPct != null ? totalPct : (totalCo != null ? (totalCo / 3.0) * 100.0 : 0.0);
+            Integer coAttainmentLevel = getAttainmentLevelFromPercent(effectivePctForLevel);
+
+            // 5. Target Benchmark Check: check if course/CO is attained or not
+            double target = coTargetMap.getOrDefault(coCode, courseTargetThreshold);
+            String finalResult = effectivePctForLevel >= target ? "Y" : "N";
+
+            if (totalPct != null) {
+                sumTotalCoPercent += totalPct;
+                evaluatedCoCount++;
+            }
+
+            totalCoLevelMap.put(coCode, totalCo != null ? totalCo : (double) coAttainmentLevel);
+
+            CourseOverallAttainment.CourseCoAttainmentRow row = CourseOverallAttainment.CourseCoAttainmentRow.builder()
+                    .coCode(coCode)
+                    .description(coDescriptions.getOrDefault(coCode, "Course Outcome " + coCode))
+                    .ia1Percent(ia1Pct)
+                    .ia2Percent(ia2Pct)
+                    .internalPercent(internalPct)
+                    .weightedInternalPercent(weightedInternalPct)
+                    .finalPercent(finalPct)
+                    .weightedFinalPercent(weightedFinalPct)
+                    .totalCoPercent(totalPct)
+                    .targetPercent(target)
+                    .finalResult(finalResult)
+                    .directAttainmentLevel(coAttainmentLevel)
+                    .ia1Level(ia1Level)
+                    .ia2Level(ia2Level)
+                    .ia1Weighted(ia1Weighted)
+                    .ia2Weighted(ia2Weighted)
+                    .internalLevel(internalLevel)
+                    .weightedInternal(weightedInternal)
+                    .finalLevel(finalLevel)
+                    .weightedFinal(weightedFinal)
+                    .totalCoAttainment(totalCo)
+                    .build();
+            coRows.add(row);
+        }
+
+        // 6. Overall Course-level Attainment Percentage and Level
+        Double overallCourseAttainmentPercent = evaluatedCoCount > 0
+                ? Math.round((sumTotalCoPercent / evaluatedCoCount) * 100.0) / 100.0
+                : null;
+
+        Integer overallCourseAttainmentLevel = getAttainmentLevelFromPercent(overallCourseAttainmentPercent);
+
+        String overallCourseAttained = (overallCourseAttainmentPercent != null && overallCourseAttainmentPercent >= courseTargetThreshold)
+                ? "Y"
+                : "N";
+
+        // 7. Calculate PO Attainment using the combined Total CO Attainments
+        List<PoAttainmentSummary> poAttainments = calculatePoAttainmentForCourse(course, totalCoLevelMap);
+
+        CourseOverallAttainment overall = courseOverallAttainmentRepository.findByCourseId(courseId)
+                .orElse(new CourseOverallAttainment());
+
+        overall.setCourseId(course.getId());
+        overall.setCourseCode(course.getCourseCode());
+        overall.setCourseName(course.getCourseName());
+        overall.setInternalWeightage(internalWeight);
+        overall.setExternalWeightage(externalWeight);
+        overall.setCourseTargetThreshold(courseTargetThreshold);
+        overall.setOverallCourseAttainmentPercent(overallCourseAttainmentPercent);
+        overall.setOverallCourseAttainmentLevel(overallCourseAttainmentLevel);
+        overall.setOverallCourseAttained(overallCourseAttained);
+        overall.setIa1Entered(ia1Entered);
+        overall.setIa2Entered(ia2Entered);
+        overall.setFinalEntered(finalEntered);
+        overall.setIa1ExamId(ia1Exam != null ? ia1Exam.getId() : null);
+        overall.setIa2ExamId(ia2Exam != null ? ia2Exam.getId() : null);
+        overall.setFinalExamId(finalExam != null ? finalExam.getId() : null);
+        overall.setCoAttainments(coRows);
+        overall.setPoAttainments(poAttainments);
+
+        return courseOverallAttainmentRepository.save(overall);
+    }
+
+    private String getExamCategory(ExamAssessment e) {
+        if (e == null) return "IA 1";
+        String et = (e.getExamType() != null ? e.getExamType() : "").toUpperCase();
+        String t = (e.getTitle() != null ? e.getTitle() : "").toUpperCase();
+
+        if (et.contains("SEM") || et.contains("FINAL") || et.contains("MODEL") || et.contains("END") || t.contains("FINAL") || t.contains("SEMESTER") || t.contains("MODEL") || t.contains("END")) {
+            return "SEM final";
+        }
+        if (et.contains("IAT-2") || et.contains("IA2") || et.contains("IA 2") || t.contains("TEST - 2") || t.contains("TEST 2") || t.contains("IA 2") || t.contains("IA-2") || t.contains("IAT 2") || t.contains("IAT-2") || t.contains("MID 2") || t.contains("MID-2") || (et.contains("2") && !et.contains("1"))) {
+            return "IA 2";
+        }
+        return "IA 1";
+    }
+
+    private AttainmentReport getReportForExam(ExamAssessment exam) {
+        if (exam == null || exam.getId() == null) return null;
+        Optional<AttainmentReport> opt = attainmentReportRepository.findByExamId(exam.getId());
+        if (opt.isPresent()) return opt.get();
+
+        List<StudentMarksRecord> records = studentMarksRecordRepository.findByExamId(exam.getId());
+        if (records != null && !records.isEmpty()) {
+            try {
+                return calculateExamAttainment(exam.getId());
+            } catch (Exception ignored) {}
+        }
+        return null;
+    }
+
+    private Double getCoLevelFromReport(AttainmentReport report, String coCode) {
+        if (report == null || report.getCoAttainments() == null) return null;
+        for (CoAttainmentSummary c : report.getCoAttainments()) {
+            if (coCode.equalsIgnoreCase(c.getCoCode())) {
+                double lvl = c.getDirectAttainmentLevel();
+                if (lvl <= 0 && c.getStudentsMetPercent() > 0) {
+                    lvl = (double) getAttainmentLevelFromPercent(c.getStudentsMetPercent());
+                }
+                return lvl;
+            }
+        }
+        return null;
+    }
+
+    private Double getCoPercentFromReport(AttainmentReport report, String coCode) {
+        if (report == null || report.getCoAttainments() == null) return null;
+        for (CoAttainmentSummary c : report.getCoAttainments()) {
+            if (coCode.equalsIgnoreCase(c.getCoCode())) {
+                return c.getStudentsMetPercent();
+            }
+        }
+        return null;
+    }
+
+    private List<PoAttainmentSummary> calculatePoAttainmentForCourse(Course course, Map<String, Double> coLevelMap) {
+        List<PoAttainmentSummary> poAttainments = new ArrayList<>();
+        List<CoPoMapping> mappings = course.getCoPoMappings() != null ?
+                course.getCoPoMappings() : new ArrayList<>();
+
+        Map<String, List<CoPoMapping>> poMapGroup = new LinkedHashMap<>();
+        List<String> standardPos = Arrays.asList(
+                "PO1", "PO2", "PO3", "PO4", "PO5", "PO6",
+                "PO7", "PO8", "PO9", "PO10", "PO11", "PO12",
+                "PSO1", "PSO2"
+        );
+        for (String po : standardPos) {
+            poMapGroup.put(po, new ArrayList<>());
+        }
+        for (CoPoMapping m : mappings) {
+            if (m.getPoCode() != null && m.getLevel() > 0) {
+                poMapGroup.computeIfAbsent(m.getPoCode(), k -> new ArrayList<>()).add(m);
+            }
+        }
+
+        double courseTargetThreshold = course.getTargetThresholdPercent() > 0 ? course.getTargetThresholdPercent() : 60.0;
+        double targetScale = courseTargetThreshold > 3.0 ? (courseTargetThreshold / 100.0) * 3.0 : courseTargetThreshold;
+        targetScale = Math.round(targetScale * 100.0) / 100.0;
+
+        for (Map.Entry<String, List<CoPoMapping>> entry : poMapGroup.entrySet()) {
+            String poCode = entry.getKey();
+            List<CoPoMapping> poMappings = entry.getValue();
+
+            double sumOfWeightages = 0.0;
+            for (CoPoMapping m : poMappings) {
+                sumOfWeightages += m.getLevel();
+            }
+
+            double sumWeightXCoAtt = 0.0;
+            List<PoAttainmentSummary.CoPoContribution> contributions = new ArrayList<>();
+
+            for (CoPoMapping m : poMappings) {
+                int wt = m.getLevel();
+                double coAttLvl = coLevelMap.getOrDefault(m.getCoCode(), 0.0);
+                double coPoAt = sumOfWeightages > 0 ? (coAttLvl * wt) / sumOfWeightages : 0.0;
+                coPoAt = Math.round(coPoAt * 100.0) / 100.0;
+
+                sumWeightXCoAtt += (coAttLvl * wt);
+
+                contributions.add(new PoAttainmentSummary.CoPoContribution(
+                        m.getCoCode(),
+                        coAttLvl,
+                        wt,
+                        coPoAt
+                ));
+            }
+
+            double poAttainment = sumOfWeightages > 0 ? (sumWeightXCoAtt / sumOfWeightages) : 0.0;
+            poAttainment = Math.round(poAttainment * 100.0) / 100.0;
+
+            String finalStatus = (sumOfWeightages > 0 && poAttainment >= targetScale) ? "Y" : "N";
+
+            PoAttainmentSummary poSum = new PoAttainmentSummary();
+            poSum.setPoCode(poCode);
+            poSum.setAttainedMappingSum(Math.round(sumWeightXCoAtt * 100.0) / 100.0);
+            poSum.setTotalMappingSum(sumOfWeightages);
+            poSum.setPoAttainmentPercent(poAttainment);
+            poSum.setTargetThreshold(targetScale);
+            poSum.setFinalStatus(finalStatus);
+            poSum.setContributions(contributions);
+
+            poAttainments.add(poSum);
+        }
+
+        return poAttainments;
+    }
+    /**
+     * Calculates the internal mid average between IA1 and IA2.
+     * If only one IA is entered, returns that IA's value without division by 2.
+     */
+    private Double calculateMidAverage(Double v1, Double v2) {
+        if (v1 != null && v2 != null) {
+            return Math.round(((v1 + v2) / 2.0) * 100.0) / 100.0;
+        } else if (v1 != null) {
+            return v1;
+        } else if (v2 != null) {
+            return v2;
+        }
+        return null;
+    }
+
+    /**
+     * Converts attainment percentage to standard NBA Level:
+     * >= 75% -> 3
+     * 70 - 75% -> 2
+     * 65 - 70% -> 1
+     * < 65% -> 0
+     */
+    private int getAttainmentLevelFromPercent(Double percent) {
+        if (percent == null) return 0;
+        if (percent >= 75.0) return 3;
+        if (percent >= 70.0) return 2;
+        if (percent >= 65.0) return 1;
+        return 0;
     }
 }

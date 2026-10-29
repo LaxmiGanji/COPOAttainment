@@ -1,5 +1,10 @@
-# Visual Studio Code (Excluded per user instructions)
+# Visual Studio Code & IntelliJ
 .vscode/
+.idea/
+backend/.idea/
+
+# Large media files
+*.mp4
 
 # Build artifacts
 backend/target/

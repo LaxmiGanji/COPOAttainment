@@ -3,6 +3,7 @@ package com.obe.copo.serviceImpl;
 import com.obe.copo.model.CoPoMapping;
 import com.obe.copo.model.Course;
 import com.obe.copo.repository.AttainmentReportRepository;
+import com.obe.copo.repository.CourseOverallAttainmentRepository;
 import com.obe.copo.repository.CourseRepository;
 import com.obe.copo.repository.ExamAssessmentRepository;
 import com.obe.copo.repository.StudentMarksRecordRepository;
@@ -28,6 +29,9 @@ public class CourseServiceImpl implements CourseService {
     @Autowired
     private AttainmentReportRepository attainmentReportRepository;
 
+    @Autowired
+    private CourseOverallAttainmentRepository courseOverallAttainmentRepository;
+
     @Override
     public List<Course> getAllCourses() {
         return courseRepository.findAll();
@@ -46,6 +50,8 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     public Optional<Course> updateCourse(String id, Course updatedCourse) {
+        //may find a match—or may not.
+        //Optional<> --> Optional.of()
         Optional<Course> existing = courseRepository.findById(id)
                 .or(() -> courseRepository.findByCourseCode(id));
         if (existing.isEmpty()) {
@@ -78,6 +84,7 @@ public class CourseServiceImpl implements CourseService {
             examAssessmentRepository.deleteByCourseId(courseDbId);
             studentMarksRecordRepository.deleteByCourseId(courseDbId);
             attainmentReportRepository.deleteByCourseId(courseDbId);
+            courseOverallAttainmentRepository.deleteByCourseId(courseDbId);
 
             courseRepository.deleteById(courseDbId);
             return true;

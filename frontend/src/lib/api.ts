@@ -179,6 +179,51 @@ export interface AttainmentReport {
   calculatedAt: string;
 }
 
+export interface CourseCoAttainmentRow {
+  coCode: string;
+  description?: string;
+  ia1Percent?: number | null;
+  ia2Percent?: number | null;
+  internalPercent?: number | null;
+  weightedInternalPercent?: number | null;
+  finalPercent?: number | null;
+  weightedFinalPercent?: number | null;
+  totalCoPercent?: number | null;
+  targetPercent?: number | null;
+  finalResult?: string | null;
+  directAttainmentLevel?: number | null;
+  ia1Level?: number | null;
+  ia2Level?: number | null;
+  ia1Weighted?: number | null;
+  ia2Weighted?: number | null;
+  internalLevel?: number | null;
+  weightedInternal?: number | null;
+  finalLevel?: number | null;
+  weightedFinal?: number | null;
+  totalCoAttainment?: number | null;
+}
+
+export interface CourseOverallAttainment {
+  id?: string;
+  courseId: string;
+  courseCode: string;
+  courseName: string;
+  internalWeightage: number;
+  externalWeightage: number;
+  courseTargetThreshold: number;
+  overallCourseAttainmentPercent?: number | null;
+  overallCourseAttainmentLevel?: number | null;
+  overallCourseAttained?: string | null;
+  ia1Entered: boolean;
+  ia2Entered: boolean;
+  finalEntered: boolean;
+  ia1ExamId?: string;
+  ia2ExamId?: string;
+  finalExamId?: string;
+  coAttainments: CourseCoAttainmentRow[];
+  poAttainments?: PoAttainmentSummary[];
+}
+
 // API functions
 export async function fetchCourses(): Promise<Course[]> {
   const res = await fetch(`${API_BASE_URL}/courses`);
@@ -305,6 +350,18 @@ export async function fetchAttainmentByExam(examId: string): Promise<AttainmentR
 
 export async function calculateAttainment(examId: string): Promise<AttainmentReport> {
   const res = await fetch(`${API_BASE_URL}/attainment/calculate/${examId}`, {
+    method: "POST",
+  });
+  return res.json();
+}
+
+export async function fetchCourseOverallAttainment(courseId: string): Promise<CourseOverallAttainment> {
+  const res = await fetch(`${API_BASE_URL}/attainment/course/${courseId}/overall`);
+  return res.json();
+}
+
+export async function calculateCourseOverallAttainment(courseId: string): Promise<CourseOverallAttainment> {
+  const res = await fetch(`${API_BASE_URL}/attainment/calculate/course/${courseId}`, {
     method: "POST",
   });
   return res.json();

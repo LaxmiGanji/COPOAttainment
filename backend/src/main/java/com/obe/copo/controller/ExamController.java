@@ -17,12 +17,13 @@ public class ExamController {
     @Autowired
     private ExamService examService;
 
-    @GetMapping("/course/{courseId}")
+    //MongoDB course ID
+    @GetMapping("/course/{courseId}")//http://localhost:8080/api/exams/course/6ae1c28c5ee0313e9ab1bda3
     public List<ExamAssessment> getExamsByCourseId(@PathVariable String courseId) {
         return examService.getExamsByCourseId(courseId);
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/{id}")//http://localhost:8080/api/exams/6ae1d0c54f47ec6286463463
     public ResponseEntity<ExamAssessment> getExamById(@PathVariable String id) {
         return examService.getExamById(id)
                 .map(ResponseEntity::ok)
@@ -49,6 +50,7 @@ public class ExamController {
         return ResponseEntity.notFound().build();
     }
 
+    //just for test. original --> evaluateStudentMarks
     @PostMapping("/simulate-rule")
     public ResponseEntity<EvaluationResult> simulateRuleEngine(@RequestBody RuleSimulationRequest request) {
         return ResponseEntity.ok(examService.simulateRuleEngine(request));

@@ -1,7 +1,9 @@
 package com.obe.copo.serviceImpl;
 
 import com.obe.copo.model.AttainmentReport;
+import com.obe.copo.model.CourseOverallAttainment;
 import com.obe.copo.repository.AttainmentReportRepository;
+import com.obe.copo.repository.CourseOverallAttainmentRepository;
 import com.obe.copo.service.AttainmentCalculationService;
 import com.obe.copo.service.AttainmentService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +21,9 @@ public class AttainmentServiceImpl implements AttainmentService {
     @Autowired
     private AttainmentReportRepository attainmentReportRepository;
 
+    @Autowired
+    private CourseOverallAttainmentRepository courseOverallAttainmentRepository;
+
     @Override
     public AttainmentReport calculateAttainment(String examId) throws Exception {
         return attainmentCalculationService.calculateExamAttainment(examId);
@@ -32,5 +37,15 @@ public class AttainmentServiceImpl implements AttainmentService {
     @Override
     public List<AttainmentReport> getReportsByCourseId(String courseId) {
         return attainmentReportRepository.findByCourseId(courseId);
+    }
+
+    @Override
+    public CourseOverallAttainment calculateCourseOverallAttainment(String courseId) {
+        return attainmentCalculationService.calculateCourseOverallAttainment(courseId);
+    }
+
+    @Override
+    public Optional<CourseOverallAttainment> getCourseOverallAttainment(String courseId) {
+        return courseOverallAttainmentRepository.findByCourseId(courseId);
     }
 }

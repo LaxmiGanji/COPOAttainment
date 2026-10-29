@@ -5,13 +5,11 @@ import { fetchStudentPerformance, fetchDistinctStudents, cleanExamTitle } from "
 import {
   User,
   Search,
-  BookOpen,
   Award,
   CheckCircle,
   XCircle,
   HelpCircle,
   ArrowRight,
-  TrendingUp,
 } from "lucide-react";
 
 export default function StudentPortalView({ initialStudentUsn }: { initialStudentUsn?: string }) {

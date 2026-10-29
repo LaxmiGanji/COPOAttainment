@@ -3,9 +3,14 @@
 import React, { useState, useEffect } from "react";
 import {
   ExamAssessment,
+  Course,
   AttainmentReport,
+  CourseOverallAttainment,
+  CourseCoAttainmentRow,
   fetchAttainmentByExam,
   calculateAttainment,
+  fetchCourseOverallAttainment,
+  calculateCourseOverallAttainment,
 } from "@/lib/api";
 import {
   BarChart,
@@ -26,26 +31,103 @@ import {
   TrendingUp,
   Target,
   FileCheck2,
-  Percent,
   Sparkles,
   AlertCircle,
+  Calculator,
+  BookOpen,
 } from "lucide-react";
 
 interface Props {
   exam: ExamAssessment | null;
+  course?: Course | null;
+  allExams?: ExamAssessment[];
 }
 
-export default function AttainmentDashboardTab({ exam }: Props) {
+export default function AttainmentDashboardTab({ exam, course, allExams: _allExams }: Props) {
   const [report, setReport] = useState<AttainmentReport | null>(null);
+  const [courseOverall, setCourseOverall] = useState<CourseOverallAttainment | null>(null);
   const [loading, setLoading] = useState(false);
   const [calculating, setCalculating] = useState(false);
   const [selectedPoBreakdown, setSelectedPoBreakdown] = useState<string>("PO1");
+  const [selectedCoBreakdown, setSelectedCoBreakdown] = useState<string>("CO1");
+
+  // User configurable target points (default 1.50 on scale 1.00 - 3.00)
+  const [targetPointsMap, setTargetPointsMap] = useState<Record<string, number>>({});
+  const [defaultTargetPoint, setDefaultTargetPoint] = useState<number>(1.50);
+
+  // Load target points from localStorage for this course
+  useEffect(() => {
+    const courseId = course?.id || exam?.courseId;
+    if (courseId && typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem(`copo_target_pts_${courseId}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && typeof parsed.defaultTarget === "number") setDefaultTargetPoint(parsed.defaultTarget);
+          if (parsed && parsed.map) setTargetPointsMap(parsed.map);
+        }
+      } catch (e) {}
+    }
+  }, [course, exam]);
+
+  const handleTargetPointChange = (coCode: string, val: number) => {
+    const nextMap = { ...targetPointsMap, [coCode]: val };
+    setTargetPointsMap(nextMap);
+    const courseId = course?.id || exam?.courseId;
+    if (courseId && typeof window !== "undefined") {
+      try {
+        localStorage.setItem(
+          `copo_target_pts_${courseId}`,
+          JSON.stringify({ defaultTarget: defaultTargetPoint, map: nextMap })
+        );
+      } catch (e) {}
+    }
+  };
+
+  const handleDefaultTargetChange = (val: number) => {
+    setDefaultTargetPoint(val);
+    const courseId = course?.id || exam?.courseId;
+    if (courseId && typeof window !== "undefined") {
+      try {
+        localStorage.setItem(
+          `copo_target_pts_${courseId}`,
+          JSON.stringify({ defaultTarget: val, map: targetPointsMap })
+        );
+      } catch (e) {}
+    }
+  };
+
+  const getTargetPointForCo = (coCode: string): number => {
+    if (targetPointsMap[coCode] !== undefined) {
+      return targetPointsMap[coCode];
+    }
+    return defaultTargetPoint;
+  };
 
   useEffect(() => {
     if (exam?.id) {
       loadReport(exam.id);
     }
   }, [exam]);
+
+  useEffect(() => {
+    const courseId = course?.id || exam?.courseId;
+    if (courseId) {
+      loadCourseOverall(courseId);
+    }
+  }, [course, exam]);
+
+  const loadCourseOverall = async (courseId: string) => {
+    try {
+      const overall = await fetchCourseOverallAttainment(courseId);
+      if (overall && overall.coAttainments && overall.coAttainments.length > 0) {
+        setCourseOverall(overall);
+        setSelectedCoBreakdown((prev) => prev || overall.coAttainments[0].coCode);
+      }
+    } catch (err) {
+      console.log("No existing course overall attainment found.");
+    }
+  };
 
   const loadReport = async (examId: string) => {
     setLoading(true);
@@ -75,6 +157,21 @@ export default function AttainmentDashboardTab({ exam }: Props) {
         const firstMapped = res.poAttainments.find((p) => p.totalMappingSum > 0);
         if (firstMapped) setSelectedPoBreakdown(firstMapped.poCode);
       }
+
+      const courseId = course?.id || exam?.courseId;
+      if (courseId) {
+        try {
+          const overall = await calculateCourseOverallAttainment(courseId);
+          if (overall && overall.coAttainments) {
+            setCourseOverall(overall);
+            if (overall.coAttainments.length > 0 && !selectedCoBreakdown) {
+              setSelectedCoBreakdown(overall.coAttainments[0].coCode);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to calculate course overall attainment:", e);
+        }
+      }
     } catch (err: any) {
       alert("Failed to compute attainment: " + err.message);
     } finally {
@@ -90,6 +187,29 @@ export default function AttainmentDashboardTab({ exam }: Props) {
       </div>
     );
   }
+
+  if (loading && !report) {
+    return (
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
+        <RefreshCw className="w-8 h-8 text-indigo-400 mx-auto mb-2 animate-spin" />
+        <p className="text-sm font-semibold">Loading attainment data...</p>
+      </div>
+    );
+  }
+
+  if (loading && !report) {
+    return (
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
+        <RefreshCw className="w-8 h-8 text-indigo-400 mx-auto mb-2 animate-spin" />
+        <p className="text-sm font-semibold">Loading attainment data...</p>
+      </div>
+    );
+  }
+
+  // Active CO for the step-by-step breakdown table
+  const activeCoRow: CourseCoAttainmentRow | undefined =
+    courseOverall?.coAttainments?.find((c) => c.coCode === selectedCoBreakdown) ||
+    courseOverall?.coAttainments?.[0];
 
   // Chart data for CO Attainment
   const coChartData =
@@ -128,6 +248,11 @@ export default function AttainmentDashboardTab({ exam }: Props) {
             <p className="text-xs text-slate-400 mt-1">
               Assessment: <strong className="text-indigo-300">{exam.title}</strong> | Evaluated Students:{" "}
               <strong className="text-emerald-400 font-bold">{report?.totalStudentsEvaluated || 0}</strong>
+              {course && (
+                <>
+                  {" "}| Course: <strong className="text-amber-300">{course.courseCode} - {course.courseName}</strong>
+                </>
+              )}
             </p>
           </div>
           <button
@@ -197,10 +322,7 @@ export default function AttainmentDashboardTab({ exam }: Props) {
               Method A: Student-Centric CO Target Attainment
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Calculates percentage of students reaching CO threshold:{" "}
-              <code className="text-indigo-300 font-mono text-[11px] bg-slate-950 border border-slate-800 px-2 py-0.5 rounded">
-                % Achieved = (Students with CO Met = &apos;Y&apos; / Total Students) * 100%
-              </code>
+              Percentage of evaluated students meeting or exceeding the benchmark target for each course outcome.
             </p>
           </div>
 
@@ -327,6 +449,478 @@ export default function AttainmentDashboardTab({ exam }: Props) {
         </div>
 
         {/* ------------------------------------------------------------- */}
+        {/* OVERALL COURSE CO ATTAINMENT CALCULATION (INTERNAL 40% + FINAL 60%) */}
+        {/* ------------------------------------------------------------- */}
+        <div className="space-y-6 mb-10 pt-4 border-t border-slate-800">
+          <div className="border-b border-slate-800 pb-3">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Calculator className="w-5 h-5 text-indigo-400" />
+              Overall Course CO Attainment Calculation (Internal 40% + Final 60%)
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Combined direct attainment aggregated across Continuous Internal Evaluations and Semester End Examination.
+            </p>
+          </div>
+
+          {/* Assessment Data Status Banner matching user reference */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3 shadow-md">
+            <div className="flex items-center gap-2 text-xs font-bold text-white">
+              <Sparkles className="w-4 h-4 text-indigo-400" />
+              <span>Assessment Data Status:</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border font-semibold text-xs ${
+                courseOverall?.ia1Entered
+                  ? "bg-emerald-950/80 border-emerald-800 text-emerald-300"
+                  : "bg-slate-900 border-slate-800 text-slate-400"
+              }`}>
+                {courseOverall?.ia1Entered ? (
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
+                )}
+                IA 1: {courseOverall?.ia1Entered ? "Entered" : "Pending"}
+              </span>
+
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border font-semibold text-xs ${
+                courseOverall?.ia2Entered
+                  ? "bg-emerald-950/80 border-emerald-800 text-emerald-300"
+                  : "bg-slate-900 border-slate-800 text-slate-400"
+              }`}>
+                {courseOverall?.ia2Entered ? (
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
+                )}
+                IA 2: {courseOverall?.ia2Entered ? "Entered" : "Pending"}
+              </span>
+
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border font-semibold text-xs ${
+                courseOverall?.finalEntered
+                  ? "bg-emerald-950/80 border-emerald-800 text-emerald-300"
+                  : "bg-slate-900 border-slate-800 text-slate-400"
+              }`}>
+                {courseOverall?.finalEntered ? (
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
+                )}
+                Final Exam: {courseOverall?.finalEntered ? "Entered" : "Pending"}
+              </span>
+            </div>
+          </div>
+
+          {/* Table 1: Complete Course Outcomes Attainment Summary Matrix */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/70 border border-slate-800/80 p-3.5 rounded-xl">
+              <div className="text-xs text-slate-300">
+                <span className="font-bold text-white">Course Outcomes Attainment Table:</span> Levels are calculated on a standard <strong>1.00 &ndash; 3.00 attainment scale</strong>.
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-bold text-indigo-300 whitespace-nowrap">
+                  Default Target Points:
+                </label>
+                <div className="flex items-center gap-1.5 bg-slate-900 border border-indigo-700/60 rounded-lg px-2.5 py-1">
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="3"
+                    value={defaultTargetPoint}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      handleDefaultTargetChange(isNaN(v) ? 1.50 : v);
+                    }}
+                    className="w-16 bg-transparent text-center text-xs font-black text-amber-300 focus:outline-none"
+                  />
+                  <span className="text-[10px] text-slate-400 font-mono">/ 3.00</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-800 rounded-xl shadow-lg">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-950 text-slate-200 border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 px-3 font-bold">Course Outcome</th>
+                    <th className="py-3 px-3 text-center font-semibold text-sky-300">coattainment IA1 (0.40&times;)</th>
+                    <th className="py-3 px-3 text-center font-semibold text-blue-300">coattainment IA2 (0.40&times;)</th>
+                    <th className="py-3 px-3 text-center font-bold text-amber-300 bg-amber-950/20">Internal Mid AT</th>
+                    <th className="py-3 px-3 text-center font-semibold text-purple-400">Final Level (0-3)</th>
+                    <th className="py-3 px-3 text-center font-semibold text-purple-300">Final AT (0.60&times;)</th>
+                    <th className="py-3 px-3 text-center font-extrabold text-emerald-300 bg-emerald-950/30">Total CO Attainment</th>
+                    <th className="py-3 px-3 text-center font-bold text-amber-300 bg-amber-950/30">Target Points</th>
+                    <th className="py-3 px-3 text-center font-semibold">Status</th>
+                    <th className="py-3 px-3 text-center font-semibold">Audit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80 bg-slate-900/60 text-slate-300">
+                  {courseOverall?.coAttainments && courseOverall.coAttainments.length > 0 ? (
+                    courseOverall.coAttainments.map((row) => {
+                      const isSelected = (selectedCoBreakdown || "CO1") === row.coCode;
+                      const targetPt = getTargetPointForCo(row.coCode);
+                      const isAttained = row.totalCoAttainment != null && row.totalCoAttainment >= targetPt;
+
+                      return (
+                        <tr
+                          key={row.coCode}
+                          className={`hover:bg-slate-800/50 transition cursor-pointer ${
+                            isSelected ? "bg-indigo-950/40" : ""
+                          }`}
+                          onClick={() => setSelectedCoBreakdown(row.coCode)}
+                        >
+                          <td className="py-3 px-3 font-extrabold text-indigo-400 font-mono text-sm">
+                            {row.coCode}
+                          </td>
+                          <td className="py-3 px-3 text-center font-mono font-bold text-sky-300">
+                            {row.ia1Weighted != null
+                              ? row.ia1Weighted.toFixed(2)
+                              : row.ia1Level != null
+                              ? (0.40 * row.ia1Level).toFixed(2)
+                              : "-"}
+                          </td>
+                          <td className="py-3 px-3 text-center font-mono font-bold text-blue-300">
+                            {row.ia2Weighted != null
+                              ? row.ia2Weighted.toFixed(2)
+                              : row.ia2Level != null
+                              ? (0.40 * row.ia2Level).toFixed(2)
+                              : "-"}
+                          </td>
+                          <td className="py-3 px-3 text-center font-mono font-black text-amber-300 bg-amber-950/20">
+                            {row.weightedInternal != null
+                              ? row.weightedInternal.toFixed(2)
+                              : row.internalLevel != null
+                              ? row.internalLevel.toFixed(2)
+                              : "-"}
+                          </td>
+                          <td className="py-3 px-3 text-center font-mono font-semibold text-slate-200">
+                            {row.finalLevel != null ? row.finalLevel.toFixed(2) : "-"}
+                          </td>
+                          <td className="py-3 px-3 text-center font-mono font-bold text-purple-300">
+                            {row.weightedFinal != null
+                              ? row.weightedFinal.toFixed(2)
+                              : row.finalLevel != null
+                              ? (0.60 * row.finalLevel).toFixed(2)
+                              : "-"}
+                          </td>
+                          <td className="py-3 px-3 text-center font-mono font-black text-emerald-300 bg-emerald-950/30 text-sm">
+                            {row.totalCoAttainment != null ? `${row.totalCoAttainment.toFixed(2)} / 3.00` : "-"}
+                          </td>
+                          <td className="py-3 px-3 text-center bg-amber-950/10">
+                            <div className="inline-flex items-center gap-1">
+                              <input
+                                type="number"
+                                step="0.05"
+                                min="0"
+                                max="3"
+                                value={targetPt}
+                                onChange={(e) => {
+                                  const v = parseFloat(e.target.value);
+                                  handleTargetPointChange(row.coCode, isNaN(v) ? 0 : v);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-16 px-1.5 py-1 bg-slate-950 border border-amber-600/60 rounded text-center text-xs font-black text-amber-300 focus:outline-none focus:border-amber-400"
+                              />
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            {row.totalCoAttainment != null ? (
+                              <span
+                                className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-bold rounded-full ${
+                                  isAttained
+                                    ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                                    : "bg-rose-950 text-rose-300 border border-rose-800"
+                                }`}
+                              >
+                                {isAttained ? (
+                                  <>
+                                    <CheckCircle className="w-3 h-3 text-emerald-400" /> Attained (Y)
+                                  </>
+                                ) : (
+                                  <>
+                                    <XCircle className="w-3 h-3 text-rose-400" /> Not Met (N)
+                                  </>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 text-xs">-</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedCoBreakdown(row.coCode);
+                              }}
+                              className={`px-2 py-1 text-[11px] font-semibold rounded-lg border transition ${
+                                isSelected
+                                  ? "bg-indigo-600 text-white border-indigo-500 shadow-md"
+                                  : "bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-600"
+                              }`}
+                            >
+                              View Table
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={10} className="py-8 text-center text-slate-400">
+                        Overall attainment calculation pending. Click &quot;Recalculate Attainment&quot; above to generate.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Table 2: Exact Step-by-Step Calculation Table matching User Reference */}
+          {activeCoRow && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 bg-slate-950 border border-indigo-900/50 rounded-2xl p-6 shadow-xl">
+              {/* Left Column: Exact Calculation Table matching Screenshot */}
+              <div className="lg:col-span-7 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded bg-indigo-600 text-white font-mono text-xs font-black">
+                        {activeCoRow.coCode}
+                      </span>
+                      Step-by-Step CO Attainment Calculation Table
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Exact audit formula breakdown for <strong>{activeCoRow.coCode}</strong>
+                    </p>
+                  </div>
+
+                  {/* CO Selector Pills */}
+                  <div className="flex flex-wrap items-center gap-1">
+                    {courseOverall?.coAttainments?.map((c) => (
+                      <button
+                        key={c.coCode}
+                        type="button"
+                        onClick={() => setSelectedCoBreakdown(c.coCode)}
+                        className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition cursor-pointer ${
+                          activeCoRow.coCode === c.coCode
+                            ? "bg-indigo-600 text-white border-indigo-500 shadow-md"
+                            : "bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700"
+                        }`}
+                      >
+                        {c.coCode}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* THE 3-COLUMN CALCULATION TABLE MATCHING USER SCREENSHOT */}
+                {(() => {
+                  const ia1Lvl = activeCoRow.ia1Level != null ? activeCoRow.ia1Level.toFixed(2) : "0.00";
+                  const ia1Wt = activeCoRow.ia1Weighted != null
+                    ? activeCoRow.ia1Weighted.toFixed(2)
+                    : activeCoRow.ia1Level != null
+                    ? (0.40 * activeCoRow.ia1Level).toFixed(2)
+                    : "0.00";
+
+                  const ia2Lvl = activeCoRow.ia2Level != null ? activeCoRow.ia2Level.toFixed(2) : null;
+                  const ia2Wt = activeCoRow.ia2Weighted != null
+                    ? activeCoRow.ia2Weighted.toFixed(2)
+                    : activeCoRow.ia2Level != null
+                    ? (0.40 * activeCoRow.ia2Level).toFixed(2)
+                    : null;
+
+                  const intVal = activeCoRow.weightedInternal != null
+                    ? activeCoRow.weightedInternal.toFixed(2)
+                    : activeCoRow.internalLevel != null
+                    ? activeCoRow.internalLevel.toFixed(2)
+                    : ia1Wt;
+
+                  const finLvl = activeCoRow.finalLevel != null ? activeCoRow.finalLevel.toFixed(2) : "0.00";
+                  const finWt = activeCoRow.weightedFinal != null
+                    ? activeCoRow.weightedFinal.toFixed(2)
+                    : activeCoRow.finalLevel != null
+                    ? (0.60 * activeCoRow.finalLevel).toFixed(2)
+                    : "0.00";
+
+                  const totVal = activeCoRow.totalCoAttainment != null
+                    ? activeCoRow.totalCoAttainment.toFixed(2)
+                    : (parseFloat(intVal) + parseFloat(finWt)).toFixed(2);
+
+                  return (
+                    <div className="overflow-x-auto border border-slate-800 rounded-xl shadow-lg">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-slate-900 text-slate-200 border-b border-slate-800 font-bold">
+                          <tr>
+                            <th className="py-3 px-4 w-1/3">Step</th>
+                            <th className="py-3 px-4 w-1/3 text-center">Formula</th>
+                            <th className="py-3 px-4 w-1/3 text-right">Value</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/80 bg-slate-950/80 text-slate-300 font-mono">
+                          {/* Row 1: coattainment of IA1 */}
+                          <tr className="hover:bg-slate-900/50">
+                            <td className="py-3 px-4 font-bold text-white">coattainment of IA1</td>
+                            <td className="py-3 px-4 text-center text-slate-300">
+                              0.40 &times; {ia1Lvl}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-sky-400">
+                              {ia1Wt}
+                            </td>
+                          </tr>
+
+                          {/* Row 2: coattainment of IA2 */}
+                          <tr className="hover:bg-slate-900/50">
+                            <td className="py-3 px-4 font-bold text-white">coattainment of IA2</td>
+                            <td className="py-3 px-4 text-center text-slate-300">
+                              {ia2Lvl !== null ? (
+                                <>0.40 &times; {ia2Lvl}</>
+                              ) : (
+                                <span className="text-slate-500 italic">IA 2 Not Entered (0.00)</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-blue-400">
+                              {ia2Wt !== null ? ia2Wt : <span className="text-slate-500">-</span>}
+                            </td>
+                          </tr>
+
+                          {/* Row 3: Internal Mid Attainment */}
+                          <tr className="hover:bg-slate-900/50 bg-amber-950/10">
+                            <td className="py-3 px-4 font-bold text-amber-300">Internal Mid Attainment</td>
+                            <td className="py-3 px-4 text-center text-amber-200/90 font-sans">
+                              {ia2Wt !== null ? (
+                                <span className="inline-flex items-center gap-1 font-mono">
+                                  <span className="underline decoration-slate-600">({ia1Wt} + {ia2Wt})</span> / 2
+                                </span>
+                              ) : (
+                                <span className="font-mono">{ia1Wt} <span className="text-xs text-slate-400">(IA 1 alone)</span></span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right font-black text-amber-400 text-sm">
+                              {intVal}
+                            </td>
+                          </tr>
+
+                          {/* Row 4: Final Attainment */}
+                          <tr className="hover:bg-slate-900/50">
+                            <td className="py-3 px-4 font-bold text-white">Final Attainment</td>
+                            <td className="py-3 px-4 text-center text-slate-300">
+                              0.60 &times; {finLvl}
+                            </td>
+                            <td className="py-3 px-4 text-right font-bold text-purple-400">
+                              {finWt}
+                            </td>
+                          </tr>
+
+                          {/* Row 5: Total CO Attainment */}
+                          <tr className="bg-indigo-950/40 border-t-2 border-indigo-700/80">
+                            <td className="py-3.5 px-4 font-black text-white text-sm">Total CO Attainment</td>
+                            <td className="py-3.5 px-4 text-center text-indigo-300 text-xs font-sans">
+                              {intVal} + {finWt} <span className="text-[11px] text-slate-400 italic">(simple sum)</span>
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-black text-emerald-400 text-base">
+                              {totVal} / 3.00
+                            </td>
+                          </tr>
+
+                          {/* Row 6: Target Benchmark Points */}
+                          {(() => {
+                            const targetPt = getTargetPointForCo(activeCoRow.coCode);
+                            const totalNum = parseFloat(totVal) || 0;
+                            const isAttained = totalNum >= targetPt;
+                            return (
+                              <>
+                                <tr className="hover:bg-slate-900/50 bg-slate-900/30">
+                                  <td className="py-2.5 px-4 font-bold text-slate-300">Target Points Benchmark</td>
+                                  <td className="py-2.5 px-4 text-center text-slate-400 text-xs font-sans">
+                                    Configured Course Target (Scale 1.00 &ndash; 3.00)
+                                  </td>
+                                  <td className="py-2.5 px-4 text-right font-black text-amber-300">
+                                    {targetPt.toFixed(2)}
+                                  </td>
+                                </tr>
+                                <tr className="hover:bg-slate-900/50 bg-slate-900/40">
+                                  <td className="py-2.5 px-4 font-bold text-white">Attainment Result</td>
+                                  <td className="py-2.5 px-4 text-center text-xs font-sans text-slate-300">
+                                    {totVal} &ge; {targetPt.toFixed(2)} &rarr; {isAttained ? "Target Attained" : "Target Not Met"}
+                                  </td>
+                                  <td className="py-2.5 px-4 text-right">
+                                    <span
+                                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-bold rounded-full ${
+                                        isAttained
+                                          ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                                          : "bg-rose-950 text-rose-300 border border-rose-800"
+                                      }`}
+                                    >
+                                      {isAttained ? (
+                                        <>
+                                          <CheckCircle className="w-3 h-3 text-emerald-400" /> Attained (Y)
+                                        </>
+                                      ) : (
+                                        <>
+                                          <XCircle className="w-3 h-3 text-rose-400" /> Not Met (N)
+                                        </>
+                                      )}
+                                    </span>
+                                  </td>
+                                </tr>
+                              </>
+                            );
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Right Column: NBA Attainment Level Rubric */}
+              <div className="lg:col-span-5 flex flex-col justify-between space-y-4 bg-slate-900/70 border border-slate-800 rounded-xl p-4">
+                <div>
+                  <h5 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800 pb-2">
+                    <BookOpen className="w-4 h-4 text-indigo-400" />
+                    Rubrics for CO Attainment Level (COAL)
+                  </h5>
+                  <div className="overflow-x-auto mt-3 border border-slate-800 rounded-lg">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-950 text-slate-300 border-b border-slate-800">
+                        <tr>
+                          <th className="py-2 px-3 text-center font-bold w-16">COAL</th>
+                          <th className="py-2 px-3 font-semibold">Attainment Criterion (% Students &ge; Threshold)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/80 bg-slate-950/60 text-slate-300">
+                        <tr className="hover:bg-slate-900/50">
+                          <td className="py-2 px-3 text-center font-black text-emerald-400 bg-emerald-950/20">3</td>
+                          <td className="py-2 px-3">&ge; 75% &ndash; 80% Students score &ge; Threshold</td>
+                        </tr>
+                        <tr className="hover:bg-slate-900/50">
+                          <td className="py-2 px-3 text-center font-black text-blue-400 bg-blue-950/20">2</td>
+                          <td className="py-2 px-3">70% &ndash; 75% Students score &ge; Threshold</td>
+                        </tr>
+                        <tr className="hover:bg-slate-900/50">
+                          <td className="py-2 px-3 text-center font-black text-amber-400 bg-amber-950/20">1</td>
+                          <td className="py-2 px-3">60% &ndash; 70% Students score &ge; Threshold</td>
+                        </tr>
+                        <tr className="hover:bg-slate-900/50">
+                          <td className="py-2 px-3 text-center font-black text-rose-400 bg-rose-950/20">0</td>
+                          <td className="py-2 px-3">&lt; 60% Students score &ge; Threshold</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-[11px] text-slate-400 leading-relaxed font-sans">
+                  <strong className="text-slate-200 block mb-1">Target Benchmark Attainment Check:</strong>
+                  If Total CO Attainment &ge; Target Points (default <strong>1.50</strong>), the Course Outcome is <strong>Attained (Y)</strong>, otherwise <strong>Not Met (N)</strong>.
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ------------------------------------------------------------- */}
         {/* METHOD B: QUESTION-LEVEL THRESHOLD AGGREGATE */}
         {/* ------------------------------------------------------------- */}
         <div className="space-y-4 mb-10">
@@ -336,10 +930,7 @@ export default function AttainmentDashboardTab({ exam }: Props) {
               Method B: Question-Level Threshold Aggregate Grid
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Checks how many students cleared threshold mark T_Q = M_Q × T_(percent):{" "}
-              <code className="text-indigo-300 font-mono text-[11px] bg-slate-950 border border-slate-800 px-2 py-0.5 rounded">
-                % Pass(Q_j) = (Count with Score &ge; T_Q / Attempted) * 100%
-              </code>
+              Question-level pass rates and performance metrics evaluated against question threshold marks.
             </p>
           </div>
 
@@ -406,19 +997,9 @@ export default function AttainmentDashboardTab({ exam }: Props) {
               <TrendingUp className="w-5 h-5 text-indigo-400" />
               Program Outcome (PO) Attainment Calculation
             </h3>
-            <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-xl text-xs text-slate-300 mt-2 space-y-2">
-              <span className="font-bold text-white flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-400" /> Exact Course Articulation &amp; PO Attainment Formula:
-              </span>
-              <div className="font-mono text-indigo-300 text-[11px] bg-slate-900 p-3 rounded-lg border border-slate-800 space-y-1">
-                <div>1. Sum of Weightages = &Sigma; Wt (from Course Articulation Matrix)</div>
-                <div>2. Individual CO Contribution = (Weightage &times; CO Attainment Level) / &Sigma; Wt</div>
-                <div>3. Total PO Attainment = &Sigma; [ (CO_AT &times; Wt) / &Sigma; Wt ] = &Sigma;(CO_AT &times; Wt) / &Sigma; Wt</div>
-              </div>
-              <span className="text-[11px] text-slate-400 block">
-                Calculated on a standard <strong>1.00 &ndash; 3.00 attainment scale</strong> from mapped CO attainment levels and articulation matrix weightages (1, 2, 3).
-              </span>
-            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Calculated on a standard <strong>1.00 &ndash; 3.00 attainment scale</strong> from mapped CO attainment levels and course articulation matrix weightages.
+            </p>
           </div>
 
           {/* Table 3: Attainment of Program Outcomes (POs) and PSOs */}
@@ -607,22 +1188,13 @@ export default function AttainmentDashboardTab({ exam }: Props) {
                   </table>
                 </div>
 
-                {/* Calculation Audit Notes matching user prompt */}
-                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300 space-y-1.5 font-mono">
-                  <div className="text-white font-bold text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                <div className="flex items-center justify-between bg-slate-900/90 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-slate-300">
+                  <div className="flex items-center gap-2">
                     <Target className="w-3.5 h-3.5 text-indigo-400" />
-                    Step-by-step Audit for {activePo.poCode}:
+                    <span>Sum of Weightages (&Sigma; Wt): <strong className="text-white font-mono">{activePo.totalMappingSum.toFixed(0)}</strong></span>
                   </div>
-                  <div className="text-slate-400 text-[11px]">
-                    &bull; Sum of weightages for {activePo.poCode} = <strong>{activePo.totalMappingSum.toFixed(0)}</strong>
-                  </div>
-                  {activePo.contributions && activePo.contributions.length > 0 && (
-                    <div className="text-indigo-300 text-[11px]">
-                      &bull; Example for {activePo.contributions[0].coCode} =&gt; {activePo.contributions[0].coAttainmentLevel.toFixed(2)} &times; {activePo.contributions[0].weight} = {(activePo.contributions[0].coAttainmentLevel * activePo.contributions[0].weight).toFixed(2)} =&gt; {(activePo.contributions[0].coAttainmentLevel * activePo.contributions[0].weight).toFixed(2)} / {activePo.totalMappingSum.toFixed(0)} = <strong>{activePo.contributions[0].poContribution.toFixed(2)}</strong>
-                    </div>
-                  )}
-                  <div className="text-emerald-400 font-semibold text-[11px]">
-                    &bull; Total {activePo.poCode} Attainment = Sum of all CO contributions = <strong>{activePo.poAttainmentPercent.toFixed(2)}</strong>
+                  <div className="text-emerald-400 font-bold">
+                    Total {activePo.poCode} Attainment: <span className="font-mono text-sm text-indigo-300 ml-1">{activePo.poAttainmentPercent.toFixed(2)}</span> / 3.00
                   </div>
                 </div>
               </div>

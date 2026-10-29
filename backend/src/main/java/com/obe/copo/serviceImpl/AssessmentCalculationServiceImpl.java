@@ -16,8 +16,6 @@ import com.obe.copo.model.*;
 import com.obe.copo.repository.ExamAssessmentRepository;
 import com.obe.copo.dto.EvaluationResult;
 import com.obe.copo.service.ExamService;
-import com.obe.copo.repository.StudentMarksRecordRepository;
-import com.obe.copo.repository.CourseRepository;
 import com.obe.copo.repository.StudentRepository;
 
 @Service
@@ -29,11 +27,6 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
     @Autowired(required = false)
     private StudentRepository studentRepository;
 
-    @Autowired(required = false)
-    StudentMarksRecordRepository studentMarksRecordRepository;
-
-    @Autowired(required = false)
-    private CourseRepository courseRepository;
 
     @Autowired(required = false)
     private ExamService examService;
@@ -41,14 +34,17 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
     @Override
     public SheetAssessmentDto calculateAssessmentSheet(SheetAssessmentDto input) {
         if (input == null) {
-            input = getDefaultTemplateData();
+            input = getDefaultTemplateData();//method
         }
 
+
         double threshold = input.getThreshold() > 0 ? input.getThreshold() : 50.0;// bydefault it is 50
+
+        //sheetAssessment dto
         List<QuestionMeta> midQs = input.getMidtermQuestions();
         List<QuestionMeta> finalQs = input.getFinalQuestions();
         List<StudentRowDto> students = input.getStudents();
-        int totalStudents = students != null ? students.size() : 0;
+        int totalStudents = students != null ? students.size() : 0;//default 0, if there are no students
         input.setNoOfStudents(totalStudents);
 
         // Calculate CO-Question Matrix (Max marks per CO)
@@ -63,6 +59,7 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
         for (QuestionMeta q : finalQs) {
             allCos.add(q.getCoCode());
             coFinalMax.put(q.getCoCode(), coFinalMax.getOrDefault(q.getCoCode(), 0.0) + q.getMaxMarks());
+            //by default 0 + maxMarks
         }
 
         double grandTotalMarks = 0.0;
@@ -79,10 +76,12 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
             double fin = coFinalMax.getOrDefault(co, 0.0);
             double total = mid + fin;
             coTotalMaxMap.put(co, total);
+            //total marks are calculated
             double percent = grandTotalMarks > 0 ? Math.round((total / grandTotalMarks) * 100.0) : 0.0;
+            //default 0.0
             matrixRows.add(new CoMatrixRow(co, mid, fin, total, percent));
         }
-        input.setCoQuestionMatrix(matrixRows);
+        input.setCoQuestionMatrix(matrixRows);//sheetAssessmentDto
 
         // Compute Question Threshold Marks (T_Q = M_Q * threshold)
         for (QuestionMeta q : midQs) {
@@ -101,58 +100,73 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
         // Tracking for CO achieved count
         Map<String, Integer> coAchievedCount = new LinkedHashMap<>();
         for (String co : allCos)
-            coAchievedCount.put(co, 0);
+            coAchievedCount.put(co, 0);//default assign 0 to every co
 
-        com.obe.copo.model.ExamAssessment exam = null;
+        ExamAssessment exam = null;
         if (examAssessmentRepository != null && input.getExamId() != null && !input.getExamId().trim().isEmpty()) {
             exam = examAssessmentRepository.findById(input.getExamId()).orElse(null);
-        }
+        }//getting the xam assessment id into the exam
 
         // Process every student strictly in the backend
         if (students != null) {
             for (StudentRowDto st : students) {
-                boolean hasAnyAttempt = false;
-                double midTotal = 0.0;
+                boolean hasAnyAttempt = false;//default
+                double midTotal = 0.0;//default
                 Map<String, Double> studentCoScores = new HashMap<>();
+                Map<String, Double> studentCoMaxMarks = new HashMap<>();
                 Map<String, Double> studentRawScores = new HashMap<>();
 
                 for (QuestionMeta q : midQs) {
                     String raw = st.getMidScores().get(q.getId());
-                    Double score = parseScore(raw);
+                    Double score = parseScore(raw);//method below
                     if (score != null) {
                         hasAnyAttempt = true;
                         studentRawScores.put(q.getId(), score);
-                        qMidAttempted.put(q.getId(), qMidAttempted.getOrDefault(q.getId(), 0) + 1);
+                        qMidAttempted.put(q.getId(), qMidAttempted.getOrDefault(q.getId(), 0) + 1);//counter
                         if (score >= q.getThresholdMarks()) {
-                            qMidPassed.put(q.getId(), qMidPassed.getOrDefault(q.getId(), 0) + 1);
+                            qMidPassed.put(q.getId(), qMidPassed.getOrDefault(q.getId(), 0) + 1);//counter
                         }
                     }
                 }
-
+                //if students != null and student has attempted once
                 if (hasAnyAttempt) {
+
+                    //if exam is not null, and has questions
                     if (exam != null && examService != null && exam.getQuestions() != null
                             && !exam.getQuestions().isEmpty()) {
                         EvaluationResult evalResult = examService.evaluateStudentMarks(exam, studentRawScores);
+                        //midTotal from the EvaluationResult
                         midTotal = evalResult.getTotalScore();
+
                         Set<String> selectedQIds = new HashSet<>(evalResult.getSelectedQuestionIds());
-                        for (com.obe.copo.model.QuestionConfig qc : exam.getQuestions()) {
+                        //getting the selectedQuestionIds -> selectedIds
+                        for (QuestionConfig qc : exam.getQuestions()) {
+                            //for mainQuestion
                             if (selectedQIds.contains(qc.getQuestionId())) {
                                 String coCode = qc.getPrimaryCoCode();
                                 if (!studentCoScores.containsKey(coCode)) {
                                     studentCoScores.put(coCode, 0.0);
+                                    //if doesn't containe the CO code then put the value of it to 0.0
+
                                 }
                                 if (qc.getSubQuestions() != null && !qc.getSubQuestions().isEmpty()) {
-                                    for (com.obe.copo.model.SubQuestionConfig sq : qc.getSubQuestions()) {
+                                //for subQuestion
+                                    for (SubQuestionConfig sq : qc.getSubQuestions()) {
                                         String sqCo = sq.getCoCode() != null && !sq.getCoCode().trim().isEmpty()
-                                                ? sq.getCoCode().trim()
-                                                : coCode;
+                                                ? sq.getCoCode().trim()//get the subQuestion co
+                                                : coCode;//or else return default coCode
                                         if (!studentCoScores.containsKey(sqCo)) {
                                             studentCoScores.put(sqCo, 0.0);
+                                            //if doesn't contain the CO code then put the value of it to 0.0
                                         }
                                         Double s = studentRawScores.get(sq.getSubQuestionId());
+                                        //by id u r getting the scores
                                         if (s != null) {
                                             studentCoScores.put(sqCo,
                                                     studentCoScores.getOrDefault(sqCo, 0.0) + s);
+                                            studentCoMaxMarks.put(sqCo,
+                                                    studentCoMaxMarks.getOrDefault(sqCo, 0.0) + sq.getMaxMarks());
+                                            //adding the sub question co scores
                                         }
                                     }
                                 } else {
@@ -160,10 +174,14 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
                                     if (s != null) {
                                         studentCoScores.put(coCode,
                                                 studentCoScores.getOrDefault(coCode, 0.0) + s);
+                                        studentCoMaxMarks.put(coCode,
+                                                studentCoMaxMarks.getOrDefault(coCode, 0.0) + qc.getTotalMaxMarks());
+                                        //if there are no sub questions directly adding the co scores
                                     }
                                 }
                             }
                         }
+                    //if exam is null or the student didn't attempted
                     } else {
                         for (QuestionMeta q : midQs) {
                             Double score = studentRawScores.get(q.getId());
@@ -171,6 +189,8 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
                                 midTotal += score;
                                 studentCoScores.put(q.getCoCode(),
                                         studentCoScores.getOrDefault(q.getCoCode(), 0.0) + score);
+                                studentCoMaxMarks.put(q.getCoCode(),
+                                        studentCoMaxMarks.getOrDefault(q.getCoCode(), 0.0) + q.getMaxMarks());
                             }
                         }
                     }
@@ -178,16 +198,18 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
 
                 // Final calculations
                 double finalTotal = 0.0;
-                for (QuestionMeta q : finalQs) {
+                for (QuestionMeta q : finalQs) {//st -> studentRowDto
                     String raw = st.getFinalScores().get(q.getId());
-                    Double score = parseScore(raw);
+                    Double score = parseScore(raw);//parseScore --> Method
                     if (score != null) {
                         hasAnyAttempt = true;
                         finalTotal += score;
                         studentCoScores.put(q.getCoCode(), studentCoScores.getOrDefault(q.getCoCode(), 0.0) + score);
-                        qFinalAttempted.put(q.getId(), qFinalAttempted.getOrDefault(q.getId(), 0) + 1);
+                        studentCoMaxMarks.put(q.getCoCode(), studentCoMaxMarks.getOrDefault(q.getCoCode(), 0.0) + q.getMaxMarks());
+                        //co marks
+                        qFinalAttempted.put(q.getId(), qFinalAttempted.getOrDefault(q.getId(), 0) + 1);//counter
                         if (score >= q.getThresholdMarks()) {
-                            qFinalPassed.put(q.getId(), qFinalPassed.getOrDefault(q.getId(), 0) + 1);
+                            qFinalPassed.put(q.getId(), qFinalPassed.getOrDefault(q.getId(), 0) + 1);//counter
                         }
                     }
                 }
@@ -195,6 +217,7 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
                 st.setAttempted(hasAnyAttempt);
                 if (hasAnyAttempt) {
                     st.setMidTotal(Math.round(midTotal * 10.0) / 10.0);
+                    //round of to single decimal point and store it in midTotal
                     st.setFinalTotal(Math.round(finalTotal * 10.0) / 10.0);
                     st.setOverallTotal(Math.round((midTotal + finalTotal) * 10.0) / 10.0);
                 } else {
@@ -209,7 +232,10 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
 
                 for (String co : allCos) {
                     if (hasAnyAttempt && studentCoScores.containsKey(co)) {
-                        double maxCo = coTotalMaxMap.getOrDefault(co, 0.0);
+                        double maxCo = studentCoMaxMarks.getOrDefault(co, 0.0);
+                        if (maxCo <= 0.0) {
+                            maxCo = coTotalMaxMap.getOrDefault(co, 0.0);// fallback if no marks entered
+                        }
                         double scored = studentCoScores.getOrDefault(co, 0.0);
                         double pct = maxCo > 0 ? Math.round((scored / maxCo) * 100.0) : 0.0;
                         coPercents.put(co, pct);
@@ -275,11 +301,11 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
             CoSummaryMeta meta = coSummaryMap.get(pr.getCoCode());
             double achievedPct = meta != null ? meta.getAchievedPercent() : (isAttained ? 100.0 : 0.0);
             double coLevel = 0.0;
-            if (achievedPct >= 70.0)
+            if (achievedPct >= 75.0)
                 coLevel = 3.0;
-            else if (achievedPct >= 60.0)
+            else if (achievedPct >= 70.0)
                 coLevel = 2.0;
-            else if (achievedPct >= 50.0)
+            else if (achievedPct >= 65.0)
                 coLevel = 1.0;
             else if (isAttained)
                 coLevel = 3.0;
@@ -451,7 +477,7 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
         return calculateAssessmentSheet(sheet);
     }
 
-    // Clean and empty default template
+    
 
     @Override
     public SheetAssessmentDto getDefaultTemplateData() {
@@ -496,9 +522,6 @@ public class AssessmentCalculationServiceImpl implements AssessmentCalculationSe
         return calculateAssessmentSheet(sheet);
     }
 
-    private List<PoAttainmentRow> getDefaultPoMappingRows() {
-        return new ArrayList<>();
-    }
 
     // Generates downloadable Excel matching the exact reference layout and styles.
     @Override

@@ -24,7 +24,6 @@ import {
   Cpu,
   FileSpreadsheet,
   LogOut,
-  ChevronDown,
 } from "lucide-react";
 
 interface UserSession {
@@ -39,7 +38,6 @@ export default function Home() {
   const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
 
   // Global Role: "faculty" | "student"
-  const [activeRole, setActiveRole] = useState<"faculty" | "student">("faculty");
 
   // Faculty Tabs: 1 (Course Setup) to 5/6
   const [activeTab, setActiveTab] = useState<number>(1);
@@ -50,8 +48,6 @@ export default function Home() {
   const [exams, setExams] = useState<ExamAssessment[]>([]);
   const [selectedExam, setSelectedExam] = useState<ExamAssessment | null>(null);
 
-  const [loading, setLoading] = useState(false);
-
   useEffect(() => {
     try {
       const saved = typeof window !== "undefined" ? localStorage.getItem("copo_user") : null;
@@ -59,7 +55,6 @@ export default function Home() {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.role) {
           setCurrentUser(parsed);
-          setActiveRole(parsed.role === "FACULTY" ? "faculty" : "student");
         }
       }
     } catch (e) {}
@@ -72,7 +67,6 @@ export default function Home() {
   }, [currentUser]);
 
   const loadInitialData = async () => {
-    setLoading(true);
     try {
       const courseList = await fetchCourses();
       setCourses(courseList);
@@ -88,8 +82,6 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Failed to load initial courses:", err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -99,7 +91,6 @@ export default function Home() {
   ) => {
     const user = { role, ...details };
     setCurrentUser(user);
-    setActiveRole(role === "FACULTY" ? "faculty" : "student");
     setActiveTab(1);
     try {
       if (typeof window !== "undefined") {
@@ -387,7 +378,11 @@ export default function Home() {
               )}
 
               {activeTab === 5 && (
-                <AttainmentDashboardTab exam={selectedExam} />
+                <AttainmentDashboardTab
+                  exam={selectedExam}
+                  course={selectedCourse}
+                  allExams={exams}
+                />
               )}
             </div>
           </div>

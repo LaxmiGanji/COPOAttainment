@@ -1,7 +1,6 @@
 package com.obe.copo.serviceImpl;
 
 import com.obe.copo.dto.MarksBatchRequest;
-import com.obe.copo.dto.StudentMarkInputDto;
 import com.obe.copo.model.ExamAssessment;
 import com.obe.copo.model.StudentMarksRecord;
 import com.obe.copo.repository.ExamAssessmentRepository;
@@ -15,7 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
